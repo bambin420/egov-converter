@@ -60,6 +60,7 @@ if uploaded_file is not None:
                         try:
                             # 文字コードを自動判別して読み込む関数
                             def read_file_safely(path):
+                                # e-Govで使われやすい順に試行
                                 encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
                                 for enc in encodings:
                                     try:
@@ -90,7 +91,7 @@ if uploaded_file is not None:
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            # LinuxサーバーのIPAexフォントのパス
+                            # LinuxサーバーのIPAexフォントのパス（packages.txtで入れたもの）
                             font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                             
                             if os.path.exists(font_path):
