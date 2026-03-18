@@ -27,12 +27,18 @@ def process_zip_recursive(zip_bytes, all_xml_data):
             for name in z.namelist():
                 # ZIPの中にさらにZIPがあったら、再帰的に中身をバイナリとして読む
                 if name.lower().endswith('.zip'):
-                    # .read() を使うことで、ファイルとして開かずに「データ」として取得
-                    process_zip_recursive(z.read(name), all_xml_data)
+                    try:
+                        # .read() を使うことで、ファイルとして開かずに「データ」として取得
+                        process_zip_recursive(z.read(name), all_xml_data)
+                    except:
+                        continue
                 
                 # XMLを見つけたら、内容をバイナリデータとして保存
                 elif name.lower().endswith('.xml'):
-                    all_xml_data[name] = z.read(name)
+                    try:
+                        all_xml_data[name] = z.read(name)
+                    except:
+                        continue
     except:
         pass
 
