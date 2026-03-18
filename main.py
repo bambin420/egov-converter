@@ -6,34 +6,42 @@ from fpdf import FPDF
 import os
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
-st.title("e-Gov公文書変換ツール (完全物理回避モード)")
+st.title("e-Gov公文書変換ツール (バイナリ直結モード)")
 
 def get_string_safely(byte_content):
-    # 日本語エンコードを総当たり
+    """
+    バイトデータを、エラーを無視して文字列に変換する
+    """
     for enc in ['cp932', 'utf-8', 'shift_jis', 'utf-16']:
         try:
             return byte_content.decode(enc)
         except:
             continue
-    # 最終手段：エラー文字を置換して強制デコード
+    # 最終手段：エラー文字を「?」に置換して強制デコード
     return byte_content.decode('utf-8', errors='replace')
 
-def process_zip_recursive(zip_bytes, all_contents):
+def process_zip_recursive(zip_bytes, all_xml_contents):
+    """
+    ZIPをバイナリとして扱い、ファイル名のエラーを回避して中身を抽出する
+    """
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-            # 【重要】z.namelist() や z.read(name) を使わず、z.infolist() を使う
+            # namelist() ではなく infolist() を使い、名前の自動デコードを避ける
             for info in z.infolist():
                 try:
+                    # 中身をバイナリとして読み出す
                     with z.open(info) as f:
                         content = f.read()
                     
-                    # 中身がZIPなら再帰処理
-                    if info.filename.lower().endswith('.zip'):
-                        process_zip_recursive(content, all_contents)
-                    # 中身がXMLなら保存（ファイル名は表示用にデコードを試みるが、失敗しても進む）
-                    elif info.filename.lower().endswith('.xml'):
-                        display_name = get_string_safely(info.filename.encode('cp437')) # ZIPの標準エンコードからの復元試行
-                        all_contents.append((display_name, content))
+                    # 拡張子チェック（バイナリ比較で判定）
+                    fname = info.filename.lower()
+                    
+                    if fname.endswith('.zip'):
+                        process_zip_recursive(content, all_xml_contents)
+                    elif fname.endswith('.xml'):
+                        # 表示用の名前はエラー無視で作成
+                        display_name = get_string_safely(info.filename.encode('cp437', errors='replace'))
+                        all_xml_contents.append((display_name, content))
                 except:
                     continue
     except:
@@ -42,22 +50,24 @@ def process_zip_recursive(zip_bytes, all_contents):
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
 if uploaded_file is not None:
-    input_data = uploaded_file.read()
-    all_xml_list = [] # (ファイル名, バイナリ内容) のリスト
+    # アップロードされた全データをメモリに読み込む
+    input_zip_bytes = uploaded_file.read()
+    all_xml_list = []
     
-    process_zip_recursive(input_data, all_xml_list)
+    # 全てのZIPを掘り下げてXML（のバイナリ）を探す
+    process_zip_recursive(input_zip_bytes, all_xml_list)
     
     if not all_xml_list:
         st.warning("XMLファイルが見つかりませんでした。")
     else:
-        st.info(f"{len(all_xml_list)} 個のファイルを処理します。")
+        st.info(f"{len(all_xml_list)} 個のファイルを検出。PDFに変換します。")
         
         for i, (xml_name, raw_data) in enumerate(all_xml_list):
             try:
-                # 文字列化（ここでエラーは絶対に出さない）
+                # 中身をテキスト化（エラー無視設定）
                 raw_text = get_string_safely(raw_data)
                 
-                # タグ除去
+                # XMLタグを正規表現で除去
                 clean_text = re.sub(r'<[^>]+?>', ' ', raw_text)
                 clean_text = re.sub(r'\s+', ' ', clean_text).strip()
 
@@ -65,6 +75,7 @@ if uploaded_file is not None:
                 pdf = FPDF()
                 pdf.add_page()
                 
+                # フォントの確認
                 font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                 if os.path.exists(font_path):
                     pdf.add_font('JP', '', font_path)
@@ -72,18 +83,19 @@ if uploaded_file is not None:
                     pdf.multi_cell(0, 8, txt=clean_text)
                 else:
                     pdf.set_font('Courier', size=10)
-                    pdf.multi_cell(0, 8, txt=clean_text.encode('ascii', 'ignore').decode('ascii'))
+                    safe_ascii = clean_text.encode('ascii', 'ignore').decode('ascii')
+                    pdf.multi_cell(0, 8, txt=safe_ascii)
                 
                 pdf_output = pdf.output()
                 
                 # 表示用の安全なファイル名
-                safe_name = os.path.basename(xml_name) if xml_name else f"document_{i}.xml"
+                safe_label = os.path.basename(xml_name)
                 
-                st.success(f"変換完了: {safe_name}")
+                st.success(f"変換完了: {safe_label}")
                 st.download_button(
-                    label=f"📥 PDFを保存 ({safe_name})",
+                    label=f"📥 PDFを保存: {safe_label.replace('.xml', '.pdf')}",
                     data=pdf_output,
-                    file_name=safe_name.replace('.xml', '.pdf'),
+                    file_name=safe_label.replace('.xml', '.pdf'),
                     mime="application/pdf",
                     key=f"dl_{i}"
                 )
