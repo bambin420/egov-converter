@@ -60,13 +60,13 @@ if uploaded_file is not None:
                         try:
                             # 文字コードを自動判別して読み込む関数
                             def read_file_safely(path):
+                                # e-Govで使われやすい順に試行
                                 encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
                                 for enc in encodings:
                                     try:
-                                        with open(path, 'r', encoding=enc) as f:
-                                            content = f.read()
-                                            # 解析用に bytes (UTF-8) で返す
-                                            return content.encode('utf-8')
+                                        with open(path, 'rb') as f:
+                                            raw_data = f.read()
+                                            return raw_data.decode(enc).encode('utf-8')
                                     except:
                                         continue
                                 raise ValueError("ファイルの文字コードを判別できませんでした。")
@@ -94,27 +94,4 @@ if uploaded_file is not None:
                             # LinuxサーバーのIPAexフォントのパス（packages.txtで入れたもの）
                             font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                             
-                            if os.path.exists(font_path):
-                                pdf.add_font('Japanese', '', font_path)
-                                pdf.set_font('Japanese', size=10)
-                                pdf.multi_cell(0, 8, txt=clean_text)
-                            else:
-                                # 万が一フォントがない場合
-                                st.warning("フォントが見つかりません。標準フォントで出力します。")
-                                pdf.set_font('Courier', size=10)
-                                pdf.multi_cell(0, 8, txt=clean_text.encode('ascii', 'ignore').decode('ascii'))
-                            
-                            pdf_bytes = pdf.output()
-                            
-                            st.success(f"変換完了: {os.path.basename(xml_path)}")
-                            st.download_button(
-                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                data=pdf_bytes,
-                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                mime="application/pdf",
-                                key="btn_" + xml_path
-                            )
-                        except Exception as e:
-                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
-            else:
-                st.warning("XMLファイルが見つかりませんでした。")
+                            if os.path.exists
