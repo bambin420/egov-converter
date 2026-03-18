@@ -33,14 +33,17 @@ def extract_all_zips(target_dir):
 def read_file_as_str(path):
     # e-Govで使われやすい順に試行
     encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
-    with open(path, 'rb') as f:
-        raw_data = f.read()
-        for enc in encodings:
-            try:
-                return raw_data.decode(enc)
-            except:
-                continue
-    return raw_data.decode('utf-8', errors='ignore')
+    try:
+        with open(path, 'rb') as f:
+            raw_data = f.read()
+            for enc in encodings:
+                try:
+                    return raw_data.decode(enc)
+                except:
+                    continue
+            return raw_data.decode('utf-8', errors='ignore')
+    except Exception as e:
+        return ""
 
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
@@ -75,8 +78,10 @@ if uploaded_file is not None:
                             xml_str = read_file_as_str(xml_path)
                             xsl_str = read_file_as_str(os.path.join(xml_dir, xsl_files[0]))
 
+                            if not xml_str or not xsl_str:
+                                raise ValueError("ファイルの読み込みに失敗しました。")
+
                             # XML解析 (文字列から読み込む)
-                            # parserのencoding指定を外すことで、lxmlに自動判別させます
                             parser = etree.XMLParser(recover=True)
                             xml_dom = etree.fromstring(xml_str.encode('utf-8'), parser)
                             xsl_dom = etree.fromstring(xsl_str.encode('utf-8'), parser)
