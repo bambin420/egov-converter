@@ -10,7 +10,7 @@ try:
     from lxml import etree
     from fpdf import FPDF
 except ImportError:
-    st.error("必要なライブラリが不足しています。requirements.txtを確認してください。")
+    st.error("必要なライブラリが不足しています。")
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
@@ -29,35 +29,30 @@ def extract_all_zips(target_dir):
                     except:
                         continue
 
-# 【解決の切り札】文字コード宣言を無視して強制的に解析する関数
-def safe_parse_xml(path):
-    with open(path, 'rb') as f:
-        raw_data = f.read()
-
-    # XMLの冒頭にある「encoding="xxx"」という宣言がエラーの元なので、
-    # 宣言自体を消去、またはUTF-8に書き換えてから解析させます。
-    content = raw_data
-    # Shift_JIS宣言を消去する強引な処置
-    content = content.replace(b'encoding="Shift_JIS"', b'encoding="UTF-8"')
-    content = content.replace(b'encoding="shift_jis"', b'encoding="UTF-8"')
-    content = content.replace(b'encoding="Shift-JIS"', b'encoding="UTF-8"')
-
+# 【新・解決策】XMLを解析せず、正規表現で強引にテキストを抽出する
+def get_clean_text_from_xml(path):
     encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
-    for enc in encodings:
-        try:
-            # 1. まず自前でデコード
-            decoded_text = raw_data.decode(enc)
-            # 2. XML宣言を除去（lxmlの混乱を防ぐ）
-            decoded_text = re.sub(r'<\?xml.*?\?>', '', decoded_text, flags=re.DOTALL)
-            # 3. UTF-8として解析
-            parser = etree.XMLParser(recover=True, encoding='utf-8')
-            return etree.fromstring(decoded_text.encode('utf-8'), parser)
-        except:
-            continue
+    raw_text = ""
     
-    # 最終手段
-    parser = etree.XMLParser(recover=True)
-    return etree.fromstring(raw_data, parser)
+    # 1. まずファイルを安全にデコードして「ただの文字列」にする
+    with open(path, 'rb') as f:
+        data = f.read()
+        for enc in encodings:
+            try:
+                raw_text = data.decode(enc)
+                break
+            except:
+                continue
+    
+    if not raw_text:
+        raw_text = data.decode('utf-8', errors='ignore')
+
+    # 2. XMLタグ (<...>) をすべて除去して、中身の文字だけにする
+    # e-GovのXSL変換を通さず、直接テキストを抽出することでエラーを回避
+    clean_text = re.sub(r'<[^>]+?>', ' ', raw_text)
+    # 余計な空白や改行を整理
+    clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+    return clean_text
 
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
@@ -83,48 +78,39 @@ if uploaded_file is not None:
                 st.info(f"{len(xml_list)} 個のファイルを検出しました。")
                 
                 for xml_path in xml_list:
-                    xml_dir = os.path.dirname(xml_path)
-                    xsl_files = [f for f in os.listdir(xml_dir) if f.endswith('.xsl')]
-                    
-                    if xsl_files:
-                        try:
-                            # XMLとXSLを解析
-                            xml_dom = safe_parse_xml(xml_path)
-                            xsl_dom = safe_parse_xml(os.path.join(xml_dir, xsl_files[0]))
-                            
-                            transform = etree.XSLT(xsl_dom)
-                            result_html = transform(xml_dom)
-                            
-                            html_str = str(result_html)
-                            clean_text = re.sub('<[^<]+?>', '', html_str)
-                            clean_text = clean_text.replace('\xa0', ' ').replace('\u200b', '')
+                    try:
+                        # 解析ライブラリを使わず、直接テキストを取り出す
+                        content = get_clean_text_from_xml(xml_path)
 
-                            # PDF生成
-                            pdf = FPDF()
-                            pdf.add_page()
-                            
-                            font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
-                            
-                            if os.path.exists(font_path):
-                                pdf.add_font('Japanese', '', font_path)
-                                pdf.set_font('Japanese', size=10)
-                                pdf.multi_cell(0, 8, txt=clean_text)
-                            else:
-                                st.warning("フォント未検出。標準フォントで代用します。")
-                                pdf.set_font('Helvetica', size=10)
-                                pdf.multi_cell(0, 8, txt=clean_text.encode('ascii', 'ignore').decode('ascii'))
-                            
-                            pdf_bytes = pdf.output()
-                            
-                            st.success(f"変換完了: {os.path.basename(xml_path)}")
-                            st.download_button(
-                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                data=pdf_bytes,
-                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                mime="application/pdf",
-                                key="btn_" + os.path.basename(xml_path)
-                            )
-                        except Exception as e:
-                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
+                        if not content:
+                            st.warning(f"内容が空です: {os.path.basename(xml_path)}")
+                            continue
+
+                        # PDF生成
+                        pdf = FPDF()
+                        pdf.add_page()
+                        
+                        font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
+                        
+                        if os.path.exists(font_path):
+                            pdf.add_font('Japanese', '', font_path)
+                            pdf.set_font('Japanese', size=10)
+                            pdf.multi_cell(0, 8, txt=content)
+                        else:
+                            pdf.set_font('Helvetica', size=10)
+                            pdf.multi_cell(0, 8, txt=content.encode('ascii', 'ignore').decode('ascii'))
+                        
+                        pdf_bytes = pdf.output()
+                        
+                        st.success(f"変換完了: {os.path.basename(xml_path)}")
+                        st.download_button(
+                            label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                            data=pdf_bytes,
+                            file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                            mime="application/pdf",
+                            key="btn_" + os.path.basename(xml_path)
+                        )
+                    except Exception as e:
+                        st.error(f"エラー ({os.path.basename(xml_path)}): {str(e)}")
             else:
                 st.warning("XMLファイルが見つかりませんでした。")
