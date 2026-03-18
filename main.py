@@ -60,7 +60,6 @@ if uploaded_file is not None:
                         try:
                             # 文字コードを自動判別して読み込む関数
                             def read_file_safely(path):
-                                # e-Govで使われやすい順に試行
                                 encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
                                 for enc in encodings:
                                     try:
@@ -91,7 +90,29 @@ if uploaded_file is not None:
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            # LinuxサーバーのIPAexフォントのパス（packages.txtで入れたもの）
+                            # LinuxサーバーのIPAexフォントのパス
                             font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                             
-                            if os.path.exists
+                            if os.path.exists(font_path):
+                                pdf.add_font('Japanese', '', font_path)
+                                pdf.set_font('Japanese', size=10)
+                                pdf.multi_cell(0, 8, txt=clean_text)
+                            else:
+                                st.warning("フォントが見つからないため、文字化け回避モードで出力します。")
+                                pdf.set_font('Courier', size=10)
+                                pdf.multi_cell(0, 8, txt=clean_text.encode('ascii', 'ignore').decode('ascii'))
+                            
+                            pdf_bytes = pdf.output()
+                            
+                            st.success(f"変換完了: {os.path.basename(xml_path)}")
+                            st.download_button(
+                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                data=pdf_bytes,
+                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                mime="application/pdf",
+                                key="btn_" + xml_path
+                            )
+                        except Exception as e:
+                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
+            else:
+                st.warning("XMLファイルが見つかりませんでした。")
