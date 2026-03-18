@@ -60,6 +60,7 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
+                            # ファイル読み込み関数
                             def read_file_safely(path):
                                 try:
                                     with open(path, 'r', encoding='shift_jis') as f:
@@ -84,5 +85,21 @@ if uploaded_file is not None:
                             # PDF生成
                             pdf_output = FPDF()
                             pdf_output.add_page()
-                            # 標準フォントを指定
                             pdf_output.set_font("Arial", size=10)
+                            
+                            # 変換結果を書き込み（先頭5000文字）
+                            pdf_output.multi_cell(0, 10, txt=html_str[:5000])
+                            
+                            pdf_bytes = pdf_output.output()
+                            
+                            st.success(f"変換完了: {os.path.basename(xml_path)}")
+                            st.download_button(
+                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                data=pdf_bytes,
+                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                mime="application/pdf"
+                            )
+                        except Exception as e:
+                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
+            else:
+                st.warning("XMLファイルが見つかりませんでした。")
