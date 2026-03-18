@@ -87,11 +87,10 @@ if uploaded_file is not None:
                             pdf.add_page()
                             
                             # 日本語を表示するための最も安全な設定
-                            # システムフォント(Ubuntu等)にあるフォントを試みる
                             font_candidates = [
+                                "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf", # IPAexフォントの標準パス
                                 "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-                                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-                                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+                                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
                             ]
                             
                             font_loaded = False
