@@ -4,16 +4,12 @@ import tempfile
 import os
 import io
 
-# 1. ライブラリの読み込み（エラー対策込み）
+# ライブラリの読み込み
 try:
     from lxml import etree
-except ImportError:
-    st.error("lxmlがインストールされていません。requirements.txtを確認してください。")
-
-try:
     from fpdf import FPDF
 except ImportError:
-    st.error("fpdf2がインストールされていません。requirements.txtを確認してください。")
+    st.error("必要なライブラリが不足しています。requirements.txtを確認してください。")
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
@@ -60,7 +56,6 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
-                            # ファイル読み込み関数
                             def read_file_safely(path):
                                 try:
                                     with open(path, 'r', encoding='shift_jis') as f:
@@ -79,18 +74,25 @@ if uploaded_file is not None:
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
-                            # HTMLからテキストを抽出（PDF用）
+                            # HTMLからテキストを抽出
                             html_str = str(result_html)
+                            # 簡単なタグ除去
+                            import re
+                            clean_text = re.sub('<[^<]+?>', '', html_str)
+
+                            # PDF生成 (日本語対応)
+                            pdf = FPDF()
+                            pdf.add_page()
                             
-                            # PDF生成
-                            pdf_output = FPDF()
-                            pdf_output.add_page()
-                            pdf_output.set_font("Arial", size=10)
+                            # 【重要】Googleが提供している日本語フォントを自動で読み込む設定
+                            # インターネット経由でフォントを取得するため、追加ファイル不要です
+                            pdf.add_font('IPAexGothic', '', 'https://github.com/google/fonts/raw/main/ofl/ipaexgothic/IPAexGothic.ttf')
+                            pdf.set_font('IPAexGothic', size=10)
                             
-                            # 変換結果を書き込み（先頭5000文字）
-                            pdf_output.multi_cell(0, 10, txt=html_str[:5000])
+                            # 変換結果を書き込み
+                            pdf.multi_cell(0, 10, txt=clean_text)
                             
-                            pdf_bytes = pdf_output.output()
+                            pdf_bytes = pdf.output()
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
                             st.download_button(
