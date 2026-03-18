@@ -58,56 +58,52 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
+                            # 文字コードを自動判別して読み込む関数
                             def read_file_safely(path):
-                                try:
-                                    with open(path, 'r', encoding='shift_jis') as f:
-                                        return f.read().encode('utf-8')
-                                except:
-                                    with open(path, 'r', encoding='utf-8') as f:
-                                        return f.read().encode('utf-8')
+                                encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
+                                for enc in encodings:
+                                    try:
+                                        with open(path, 'r', encoding=enc) as f:
+                                            content = f.read()
+                                            # 解析用に bytes (UTF-8) で返す
+                                            return content.encode('utf-8')
+                                    except:
+                                        continue
+                                raise ValueError("ファイルの文字コードを判別できませんでした。")
 
                             xml_data = read_file_safely(xml_path)
                             xsl_data = read_file_safely(os.path.join(xml_dir, xsl_files[0]))
 
-                            parser = etree.XMLParser(recover=True)
+                            # 解析
+                            parser = etree.XMLParser(recover=True, encoding='utf-8')
                             xml_dom = etree.fromstring(xml_data, parser)
                             xsl_dom = etree.fromstring(xsl_data, parser)
                             
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
-                            # 文字列の整理
+                            # テキストのクリーニング
                             html_str = str(result_html)
                             clean_text = re.sub('<[^<]+?>', '', html_str)
                             clean_text = clean_text.replace('\xa0', ' ').replace('\u200b', '')
 
-                            # --- PDF生成 (Unicode/UTF-8強制モード) ---
-                            # fpdf2を「Unicode」を扱える設定で起動
+                            # PDF生成
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            # 日本語を表示するための最も安全な設定
-                            font_candidates = [
-                                "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf", # IPAexフォントの標準パス
-                                "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-                                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
-                            ]
+                            # LinuxサーバーのIPAexフォントのパス（packages.txtで入れたもの）
+                            font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                             
-                            font_loaded = False
-                            for f_p in font_candidates:
-                                if os.path.exists(f_p):
-                                    pdf.add_font('Japanese', '', f_p)
-                                    pdf.set_font('Japanese', size=10)
-                                    font_loaded = True
-                                    break
-                            
-                            if not font_loaded:
-                                # フォントがない場合の最終防衛ライン: 
-                                # エラーを出すのではなく、latin-1文字だけ残してPDF化を強行
-                                clean_text = clean_text.encode('ascii', 'ignore').decode('ascii')
+                            if os.path.exists(font_path):
+                                pdf.add_font('Japanese', '', font_path)
+                                pdf.set_font('Japanese', size=10)
+                                pdf.multi_cell(0, 8, txt=clean_text)
+                            else:
+                                # 万が一フォントがない場合
+                                st.warning("フォントが見つかりません。標準フォントで出力します。")
                                 pdf.set_font('Courier', size=10)
-
-                            pdf.multi_cell(0, 8, txt=clean_text)
+                                pdf.multi_cell(0, 8, txt=clean_text.encode('ascii', 'ignore').decode('ascii'))
+                            
                             pdf_bytes = pdf.output()
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
@@ -116,7 +112,7 @@ if uploaded_file is not None:
                                 data=pdf_bytes,
                                 file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
                                 mime="application/pdf",
-                                key="btn_" + xml_path # 重複回避
+                                key="btn_" + xml_path
                             )
                         except Exception as e:
                             st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
