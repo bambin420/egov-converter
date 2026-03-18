@@ -3,19 +3,19 @@ import zipfile
 import tempfile
 import os
 from lxml import etree
-import pdfkit
-import shutil  # ← これが必要
-
-# サーバー(Linux)と自分のPC(Windows)の両方で動くための設定
-path_wkhtmltopdf = shutil.which("wkhtmltopdf")
-if not path_wkhtmltopdf:
-    # 自分のPCで動かす時の予備パス
-    path_wkhtmltopdf = r'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe'
-
-config = pdfkit.configuration(wkhtmltopdf=path_wkhtmltopdf)
+from xhtml2pdf import pisa  # pdfkitから変更
+import io
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
+
+# PDF変換用のヘルパー関数
+def convert_html_to_pdf(html_str):
+    pdf_buffer = io.BytesIO()
+    pisa_status = pisa.CreatePDF(html_str, dest=pdf_buffer)
+    if pisa_status.err:
+        return None
+    return pdf_buffer.getvalue()
 
 def extract_all_zips(target_dir):
     for root, dirs, files in os.walk(target_dir):
@@ -59,8 +59,6 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
-                            # --- 超強力な文字化け対策 ---
-                            # 1. XMLとXSLをテキストとして強制的に読み込む（矛盾を無視）
                             def read_file_safely(path):
                                 try:
                                     with open(path, 'r', encoding='shift_jis') as f:
@@ -72,7 +70,6 @@ if uploaded_file is not None:
                             xml_data = read_file_safely(xml_path)
                             xsl_data = read_file_safely(os.path.join(xml_dir, xsl_files[0]))
 
-                            # 2. 解析
                             parser = etree.XMLParser(recover=True)
                             xml_dom = etree.fromstring(xml_data, parser)
                             xsl_dom = etree.fromstring(xsl_data, parser)
@@ -80,23 +77,23 @@ if uploaded_file is not None:
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
-                            # 3. HTML内の文字コード宣言をPDF用に調整
+                            # HTML文字列の生成と調整
                             html_str = str(result_html).replace('Shift_JIS', 'UTF-8').replace('shift_jis', 'UTF-8')
                             
-                            options = {
-                                'encoding': "UTF-8",
-                                'quiet': ''
-                            }
+                            # --- PDF変換実行 (xhtml2pdfを使用) ---
+                            pdf_bytes = convert_html_to_pdf(html_str)
                             
-                            pdf_bytes = pdfkit.from_string(html_str, False, configuration=config, options=options)
-                            
-                            st.success(f"変換完了: {os.path.basename(xml_path)}")
-                            st.download_button(
-                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                data=pdf_bytes,
-                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                mime="application/pdf"
-                            )
+                            if pdf_bytes:
+                                st.success(f"変換完了: {os.path.basename(xml_path)}")
+                                st.download_button(
+                                    label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                    data=pdf_bytes,
+                                    file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                    mime="application/pdf"
+                                )
+                            else:
+                                st.error(f"PDF生成に失敗しました: {os.path.basename(xml_path)}")
+
                         except Exception as e:
                             st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
             else:
