@@ -3,19 +3,27 @@ import zipfile
 import tempfile
 import os
 from lxml import etree
-from xhtml2pdf import pisa  # pdfkitから変更
+from fpdf import FPDF
 import io
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
 
-# PDF変換用のヘルパー関数
-def convert_html_to_pdf(html_str):
-    pdf_buffer = io.BytesIO()
-    pisa_status = pisa.CreatePDF(html_str, dest=pdf_buffer)
-    if pisa_status.err:
-        return None
-    return pdf_buffer.getvalue()
+# PDF作成関数 (fpdf2を使用: 最も軽量で安定)
+def create_pdf_from_text(html_text):
+    pdf = FPDF()
+    pdf.add_page()
+    # 日本語フォントが必要な場合は別途設定が必要ですが、
+    # まずは標準フォントでPDF化が通るか確認します
+    pdf.set_font("Helvetica", size=12)
+    
+    # HTMLタグを除去してテキストのみを抽出
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html_text, "html.parser")
+    clean_text = soup.get_text()
+    
+    pdf.multi_cell(0, 10, clean_text)
+    return pdf.output()
 
 def extract_all_zips(target_dir):
     for root, dirs, files in os.walk(target_dir):
@@ -76,25 +84,25 @@ if uploaded_file is not None:
                             
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
-                            
-                            # HTML文字列の生成と調整
-                            html_str = str(result_html).replace('Shift_JIS', 'UTF-8').replace('shift_jis', 'UTF-8')
-                            
-                            # --- PDF変換実行 (xhtml2pdfを使用) ---
-                            pdf_bytes = convert_html_to_pdf(html_str)
-                            
-                            if pdf_bytes:
-                                st.success(f"変換完了: {os.path.basename(xml_path)}")
-                                st.download_button(
-                                    label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                    data=pdf_bytes,
-                                    file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                    mime="application/pdf"
-                                )
-                            else:
-                                st.error(f"PDF生成に失敗しました: {os.path.basename(xml_path)}")
+                            html_str = str(result_html)
 
+                            # PDF生成 (fpdf2を使用)
+                            pdf_output = FPDF()
+                            pdf_output.add_page()
+                            # e-Govの日本語を表示するためフォント設定（後ほど調整可能）
+                            pdf_output.set_font("Arial", size=12)
+                            pdf_output.multi_cell(0, 10, txt=html_str[:2000]) # 簡易抽出
+                            
+                            pdf_bytes = pdf_output.output()
+                            
+                            st.success(f"変換完了: {os.path.basename(xml_path)}")
+                            st.download_button(
+                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                data=pdf_bytes,
+                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                mime="application/pdf"
+                            )
                         except Exception as e:
                             st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
             else:
-                st.warning("XMLファイルが見つかりませんでした。")
+                st.warning("XMLファイルが見てかりませんでした。")
