@@ -3,6 +3,7 @@ import zipfile
 import tempfile
 import os
 import io
+import requests  # 追加
 
 # ライブラリの読み込み
 try:
@@ -13,6 +14,15 @@ except ImportError:
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
+
+# フォントをダウンロードする関数
+@st.cache_data
+def download_font():
+    url = "https://github.com/google/fonts/raw/main/ofl/ipaexgothic/IPAexGothic.ttf"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.content
+    return None
 
 def extract_all_zips(target_dir):
     for root, dirs, files in os.walk(target_dir):
@@ -34,6 +44,9 @@ if uploaded_file is not None:
     if not uploaded_file.name.lower().endswith('.zip'):
         st.error("ZIPファイルをアップロードしてください。")
     else:
+        # フォントの準備
+        font_data = download_font()
+        
         with tempfile.TemporaryDirectory() as tmp_dir:
             zip_path = os.path.join(tmp_dir, "initial.zip")
             with open(zip_path, "wb") as f:
@@ -50,6 +63,13 @@ if uploaded_file is not None:
             
             if xml_list:
                 st.info(f"{len(xml_list)} 個のファイルを検出しました。")
+                
+                # 一時的にフォントファイルを保存
+                font_path = os.path.join(tmp_dir, "ipaexg.ttf")
+                if font_data:
+                    with open(font_path, "wb") as f:
+                        f.write(font_data)
+
                 for xml_path in xml_list:
                     xml_dir = os.path.dirname(xml_path)
                     xsl_files = [f for f in os.listdir(xml_dir) if f.endswith('.xsl')]
@@ -74,24 +94,21 @@ if uploaded_file is not None:
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
-                            # HTMLからテキストを抽出
                             html_str = str(result_html)
-                            # 簡単なタグ除去
                             import re
                             clean_text = re.sub('<[^<]+?>', '', html_str)
 
-                            # PDF生成 (日本語対応)
+                            # PDF生成
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            # 【重要】Googleが提供している日本語フォントを自動で読み込む設定
-                            # インターネット経由でフォントを取得するため、追加ファイル不要です
-                            pdf.add_font('IPAexGothic', '', 'https://github.com/google/fonts/raw/main/ofl/ipaexgothic/IPAexGothic.ttf')
-                            pdf.set_font('IPAexGothic', size=10)
+                            if font_data:
+                                pdf.add_font('IPAexGothic', '', font_path)
+                                pdf.set_font('IPAexGothic', size=10)
+                            else:
+                                pdf.set_font('Arial', size=10)
                             
-                            # 変換結果を書き込み
-                            pdf.multi_cell(0, 10, txt=clean_text)
-                            
+                            pdf.multi_cell(0, 8, txt=clean_text)
                             pdf_bytes = pdf.output()
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
