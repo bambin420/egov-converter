@@ -9,33 +9,27 @@ st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered"
 st.title("e-Gov公文書変換ツール (環境依存エラー回避版)")
 
 def get_string_safely(byte_content):
-    """
-    バイトデータを、エラーを無視して文字列に変換する
-    """
+    """バイトデータを環境に依存せず安全に文字列化する"""
     if not byte_content:
         return ""
-    
-    # 候補となるエンコードを順に試す
+    # 1. 日本語環境の候補を順に試す
     for enc in ['cp932', 'utf-8', 'shift_jis', 'utf-16']:
         try:
             return byte_content.decode(enc)
         except:
             continue
-    
-    # 全て失敗した場合は、エラー文字を「?」に置換して強制デコード（これでエラーは100%出ない）
+    # 2. 全て失敗した場合はエラー文字を置換して強制デコード
     return byte_content.decode('utf-8', errors='replace')
 
 def process_zip_recursive(zip_bytes, all_xml_contents):
-    """
-    ZIPをバイナリとして扱い、ファイル名による自爆を避けて中身を抽出する
-    """
+    """ZIPをバイナリとして扱い、ファイル名による自爆を避けて中身を抽出する"""
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-            # infolist() を使い、名前の自動デコードが走る前にポインタを掴む
             for info in z.infolist():
                 try:
-                    # ファイル名をバイナリのまま取得し、安全に文字列化する
-                    # ZIP内のファイル名はCP437で記録されていることが多いため一度戻す
+                    # 【ここが最重要】
+                    # zipfileはファイル名を勝手にデコードしようとするため、
+                    # 一度強制的にバイト列(cp437)に戻してから、正しくデコードし直す
                     try:
                         raw_filename = info.filename.encode('cp437')
                     except:
@@ -59,20 +53,19 @@ def process_zip_recursive(zip_bytes, all_xml_contents):
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
 if uploaded_file is not None:
-    # アップロード直後にバイナリとして取得
     input_data = uploaded_file.read()
     all_xml_list = []
     
     process_zip_recursive(input_data, all_xml_list)
     
     if not all_xml_list:
-        st.warning("XMLファイルが見かかりませんでした。")
+        st.warning("XMLファイルが見つかりませんでした。")
     else:
         st.info(f"{len(all_xml_list)} 個のファイルを検出しました。")
         
         for i, (xml_name, raw_data) in enumerate(all_xml_list):
             try:
-                # 中身をテキスト化（OSの設定を無視して手動デコード）
+                # 中身をテキスト化（エラーを物理的に回避）
                 raw_text = get_string_safely(raw_data)
                 
                 # XMLタグを除去
@@ -83,6 +76,7 @@ if uploaded_file is not None:
                 pdf = FPDF()
                 pdf.add_page()
                 
+                # フォントの指定（IPAexフォント）
                 font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                 if os.path.exists(font_path):
                     pdf.add_font('JP', '', font_path)
@@ -95,7 +89,7 @@ if uploaded_file is not None:
                 
                 pdf_output = pdf.output()
                 
-                # 安全な表示名を作成
+                # 安全な表示名
                 safe_label = os.path.basename(xml_name)
                 
                 st.success(f"変換完了: {safe_label}")
@@ -107,5 +101,4 @@ if uploaded_file is not None:
                     key=f"dl_{i}_{safe_label}"
                 )
             except Exception as e:
-                # 万が一エラーが出ても、どのステップで止まったか詳細を出す
                 st.error(f"変換エラー ({xml_name}): {str(e)}")
