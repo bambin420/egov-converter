@@ -3,7 +3,8 @@ import zipfile
 import tempfile
 import os
 import io
-import requests  # 追加
+import requests
+import re
 
 # ライブラリの読み込み
 try:
@@ -15,14 +16,17 @@ except ImportError:
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
 
-# フォントをダウンロードする関数
-@st.cache_data
-def download_font():
+# フォントをダウンロードして一時保存する関数
+@st.cache_resource
+def get_font_path():
     url = "https://github.com/google/fonts/raw/main/ofl/ipaexgothic/IPAexGothic.ttf"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.content
-    return None
+    target_path = os.path.join(tempfile.gettempdir(), "ipaexg.ttf")
+    if not os.path.exists(target_path):
+        response = requests.get(url)
+        if response.status_code == 200:
+            with open(target_path, "wb") as f:
+                f.write(response.content)
+    return target_path
 
 def extract_all_zips(target_dir):
     for root, dirs, files in os.walk(target_dir):
@@ -45,7 +49,7 @@ if uploaded_file is not None:
         st.error("ZIPファイルをアップロードしてください。")
     else:
         # フォントの準備
-        font_data = download_font()
+        f_path = get_font_path()
         
         with tempfile.TemporaryDirectory() as tmp_dir:
             zip_path = os.path.join(tmp_dir, "initial.zip")
@@ -64,12 +68,6 @@ if uploaded_file is not None:
             if xml_list:
                 st.info(f"{len(xml_list)} 個のファイルを検出しました。")
                 
-                # 一時的にフォントファイルを保存
-                font_path = os.path.join(tmp_dir, "ipaexg.ttf")
-                if font_data:
-                    with open(font_path, "wb") as f:
-                        f.write(font_data)
-
                 for xml_path in xml_list:
                     xml_dir = os.path.dirname(xml_path)
                     xsl_files = [f for f in os.listdir(xml_dir) if f.endswith('.xsl')]
@@ -94,21 +92,27 @@ if uploaded_file is not None:
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
+                            # タグを除去し、PDFでエラーになりやすい特殊な空白などを置換
                             html_str = str(result_html)
-                            import re
                             clean_text = re.sub('<[^<]+?>', '', html_str)
+                            # latin-1エラーを避けるためのクリーニング
+                            clean_text = clean_text.replace('\xa0', ' ').replace('\u200b', '')
 
                             # PDF生成
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            if font_data:
-                                pdf.add_font('IPAexGothic', '', font_path)
+                            # フォントを確実に追加してセット
+                            if os.path.exists(f_path):
+                                pdf.add_font('IPAexGothic', '', f_path)
                                 pdf.set_font('IPAexGothic', size=10)
                             else:
-                                pdf.set_font('Arial', size=10)
+                                st.error("フォントの読み込みに失敗しました。")
+                                pdf.set_font('Courier', size=10) # 予備
                             
-                            pdf.multi_cell(0, 8, txt=clean_text)
+                            # txt= の中身を明示的に str 型にして渡す
+                            pdf.multi_cell(0, 8, txt=str(clean_text))
+                            
                             pdf_bytes = pdf.output()
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
@@ -116,7 +120,8 @@ if uploaded_file is not None:
                                 label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
                                 data=pdf_bytes,
                                 file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                mime="application/pdf"
+                                mime="application/pdf",
+                                key=xml_path # ボタンの重複を避けるためのキー
                             )
                         except Exception as e:
                             st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
