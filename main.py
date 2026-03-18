@@ -29,7 +29,7 @@ def extract_all_zips(target_dir):
                     except:
                         continue
 
-# 【修正の要】文字コードを安全に判別し、lxmlが文句を言わない形式で返す
+# 文字コードを安全に判別し、lxmlが文句を言わない形式で返す
 def get_xml_dom(path):
     encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
     with open(path, 'rb') as f:
@@ -37,16 +37,14 @@ def get_xml_dom(path):
         
     for enc in encodings:
         try:
-            # 1. まず指定のエンコードでデコードできるか試す
+            # エンコードして、lxmlが好む「UTF-8のバイト列」に変換
             decoded_text = raw_data.decode(enc)
-            # 2. 成功したら、それを一度「XML宣言なしのバイト列」にしてから解析に渡す
-            # これにより、lxml内部での二重デコードを防ぎます
             parser = etree.XMLParser(recover=True)
             return etree.fromstring(decoded_text.encode('utf-8'), parser)
         except:
             continue
     
-    # 最終手段：エラーを無視して読み込む
+    # 最終手段
     parser = etree.XMLParser(recover=True)
     return etree.fromstring(raw_data.decode('utf-8', errors='ignore').encode('utf-8'), parser)
 
@@ -79,14 +77,12 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
-                            # 修正した関数でDOMを取得
                             xml_dom = get_xml_dom(xml_path)
                             xsl_dom = get_xml_dom(os.path.join(xml_dir, xsl_files[0]))
                             
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
-                            # テキストのクリーニング
                             html_str = str(result_html)
                             clean_text = re.sub('<[^<]+?>', '', html_str)
                             clean_text = clean_text.replace('\xa0', ' ').replace('\u200b', '')
@@ -110,4 +106,15 @@ if uploaded_file is not None:
                             pdf_bytes = pdf.output()
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
+                            # 括弧の閉じ忘れを修正
                             st.download_button(
+                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                data=pdf_bytes,
+                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
+                                mime="application/pdf",
+                                key="btn_" + xml_path
+                            )
+                        except Exception as e:
+                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
+            else:
+                st.warning("XMLファイルが見つかりませんでした。")
