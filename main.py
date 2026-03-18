@@ -29,6 +29,19 @@ def extract_all_zips(target_dir):
                     except:
                         continue
 
+# 文字コードを安全に判別して「文字列」として返す関数
+def read_file_as_str(path):
+    # e-Govで使われやすい順に試行
+    encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
+    with open(path, 'rb') as f:
+        raw_data = f.read()
+        for enc in encodings:
+            try:
+                return raw_data.decode(enc)
+            except:
+                continue
+    return raw_data.decode('utf-8', errors='ignore')
+
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
 if uploaded_file is not None:
@@ -58,26 +71,15 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
-                            # 文字コードを自動判別して読み込む関数
-                            def read_file_safely(path):
-                                # e-Govで使われやすい順に試行
-                                encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
-                                for enc in encodings:
-                                    try:
-                                        with open(path, 'rb') as f:
-                                            raw_data = f.read()
-                                            return raw_data.decode(enc).encode('utf-8')
-                                    except:
-                                        continue
-                                raise ValueError("ファイルの文字コードを判別できませんでした。")
+                            # ファイルを文字列として読み込む
+                            xml_str = read_file_as_str(xml_path)
+                            xsl_str = read_file_as_str(os.path.join(xml_dir, xsl_files[0]))
 
-                            xml_data = read_file_safely(xml_path)
-                            xsl_data = read_file_safely(os.path.join(xml_dir, xsl_files[0]))
-
-                            # 解析
-                            parser = etree.XMLParser(recover=True, encoding='utf-8')
-                            xml_dom = etree.fromstring(xml_data, parser)
-                            xsl_dom = etree.fromstring(xsl_data, parser)
+                            # XML解析 (文字列から読み込む)
+                            # parserのencoding指定を外すことで、lxmlに自動判別させます
+                            parser = etree.XMLParser(recover=True)
+                            xml_dom = etree.fromstring(xml_str.encode('utf-8'), parser)
+                            xsl_dom = etree.fromstring(xsl_str.encode('utf-8'), parser)
                             
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
@@ -91,7 +93,7 @@ if uploaded_file is not None:
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            # LinuxサーバーのIPAexフォントのパス（packages.txtで入れたもの）
+                            # LinuxサーバーのIPAexフォントのパス
                             font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                             
                             if os.path.exists(font_path):
@@ -99,7 +101,7 @@ if uploaded_file is not None:
                                 pdf.set_font('Japanese', size=10)
                                 pdf.multi_cell(0, 8, txt=clean_text)
                             else:
-                                st.warning("フォントが見つからないため、文字化け回避モードで出力します。")
+                                st.warning("フォントが見つからないため、標準フォントで出力します。")
                                 pdf.set_font('Courier', size=10)
                                 pdf.multi_cell(0, 8, txt=clean_text.encode('ascii', 'ignore').decode('ascii'))
                             
