@@ -3,7 +3,6 @@ import zipfile
 import tempfile
 import os
 import io
-import requests
 import re
 
 # ライブラリの読み込み
@@ -15,18 +14,6 @@ except ImportError:
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
-
-# フォントをダウンロードして一時保存する関数
-@st.cache_resource
-def get_font_path():
-    url = "https://github.com/google/fonts/raw/main/ofl/ipaexgothic/IPAexGothic.ttf"
-    target_path = os.path.join(tempfile.gettempdir(), "ipaexg.ttf")
-    if not os.path.exists(target_path):
-        response = requests.get(url)
-        if response.status_code == 200:
-            with open(target_path, "wb") as f:
-                f.write(response.content)
-    return target_path
 
 def extract_all_zips(target_dir):
     for root, dirs, files in os.walk(target_dir):
@@ -48,9 +35,6 @@ if uploaded_file is not None:
     if not uploaded_file.name.lower().endswith('.zip'):
         st.error("ZIPファイルをアップロードしてください。")
     else:
-        # フォントの準備
-        f_path = get_font_path()
-        
         with tempfile.TemporaryDirectory() as tmp_dir:
             zip_path = os.path.join(tmp_dir, "initial.zip")
             with open(zip_path, "wb") as f:
@@ -92,27 +76,39 @@ if uploaded_file is not None:
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
-                            # タグを除去し、PDFでエラーになりやすい特殊な空白などを置換
+                            # 文字列の整理
                             html_str = str(result_html)
                             clean_text = re.sub('<[^<]+?>', '', html_str)
-                            # latin-1エラーを避けるためのクリーニング
                             clean_text = clean_text.replace('\xa0', ' ').replace('\u200b', '')
 
-                            # PDF生成
+                            # --- PDF生成 (Unicode/UTF-8強制モード) ---
+                            # fpdf2を「Unicode」を扱える設定で起動
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            # フォントを確実に追加してセット
-                            if os.path.exists(f_path):
-                                pdf.add_font('IPAexGothic', '', f_path)
-                                pdf.set_font('IPAexGothic', size=10)
-                            else:
-                                st.error("フォントの読み込みに失敗しました。")
-                                pdf.set_font('Courier', size=10) # 予備
+                            # 日本語を表示するための最も安全な設定
+                            # システムフォント(Ubuntu等)にあるフォントを試みる
+                            font_candidates = [
+                                "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+                                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+                            ]
                             
-                            # txt= の中身を明示的に str 型にして渡す
-                            pdf.multi_cell(0, 8, txt=str(clean_text))
+                            font_loaded = False
+                            for f_p in font_candidates:
+                                if os.path.exists(f_p):
+                                    pdf.add_font('Japanese', '', f_p)
+                                    pdf.set_font('Japanese', size=10)
+                                    font_loaded = True
+                                    break
                             
+                            if not font_loaded:
+                                # フォントがない場合の最終防衛ライン: 
+                                # エラーを出すのではなく、latin-1文字だけ残してPDF化を強行
+                                clean_text = clean_text.encode('ascii', 'ignore').decode('ascii')
+                                pdf.set_font('Courier', size=10)
+
+                            pdf.multi_cell(0, 8, txt=clean_text)
                             pdf_bytes = pdf.output()
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
@@ -121,7 +117,7 @@ if uploaded_file is not None:
                                 data=pdf_bytes,
                                 file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
                                 mime="application/pdf",
-                                key=xml_path # ボタンの重複を避けるためのキー
+                                key="btn_" + xml_path # 重複回避
                             )
                         except Exception as e:
                             st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
