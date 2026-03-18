@@ -70,19 +70,21 @@ if uploaded_file is not None:
                 pdf = FPDF()
                 pdf.add_page()
                 
+                # 日本語フォントの設定
                 if os.path.exists(font_path):
                     pdf.add_font('JP', '', font_path)
                     pdf.set_font('JP', size=10)
                     pdf.multi_cell(0, 8, txt=clean_text)
                 else:
-                    st.warning("日本語フォントがシステムに見つかりません。標準フォントを使用します。")
+                    st.warning(f"フォント未検出: {font_path}")
                     pdf.set_font('helvetica', size=10)
-                    # 日本語が含まれるとエラーになるため、ASCIIのみに制限
                     safe_text = clean_text.encode('ascii', 'ignore').decode('ascii')
                     pdf.multi_cell(0, 8, txt=safe_text)
                 
-                # 【解決策】output() の戻り値を bytes 型に固定する
-                pdf_bytes = bytes(pdf.output())
+                # 【解決策】output() の戻り値を bytes 型に明示的に変換
+                # fpdf2 2.7.4以降、bytearrayで返る場合があるための対策
+                pdf_output = pdf.output()
+                pdf_bytes = bytes(pdf_output) if isinstance(pdf_output, (bytearray, bytes)) else pdf_output
                 
                 safe_label = os.path.basename(xml_name)
                 st.success(f"変換完了: {safe_label}")
