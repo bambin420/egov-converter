@@ -1,4 +1,2 @@
 streamlit
-lxml
 fpdf2
-requests
