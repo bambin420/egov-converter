@@ -2,7 +2,15 @@ import streamlit as st
 import zipfile
 import tempfile
 import os
-from lxml import etree
+# 修正前：from fpdf import FPDF
+# 修正後：以下のように書き換えてください
+
+try:
+    from fpdf import FPDF
+except ImportError:
+    # もしエラーが出たら別の名前で試みる（保険用）
+    import fpdf
+    FPDF = fpdf.FPDF
 from fpdf import FPDF
 import io
 
