@@ -29,23 +29,26 @@ def extract_all_zips(target_dir):
                     except:
                         continue
 
-# 文字コードを安全に判別し、lxmlが文句を言わない形式で返す
-def get_xml_dom(path):
+# 【最重要】文字コードを確実に処理する関数
+def safe_parse_xml(path):
+    # e-Gov XMLで使われる可能性のあるエンコードを優先順に試す
     encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
     with open(path, 'rb') as f:
         raw_data = f.read()
         
     for enc in encodings:
         try:
-            # エンコードして、lxmlが好む「UTF-8のバイト列」に変換
-            decoded_text = raw_data.decode(enc)
-            parser = etree.XMLParser(recover=True)
-            return etree.fromstring(decoded_text.encode('utf-8'), parser)
+            # 1. データを指定のエンコードで一旦デコード（文字列化）
+            text = raw_data.decode(enc)
+            # 2. XML宣言（<?xml version="1.0" encoding="Shift_JIS"?>等）が
+            # 実際の処理の邪魔になることがあるため、強引にUTF-8バイト列へ変換して渡す
+            parser = etree.XMLParser(recover=True, encoding='utf-8')
+            return etree.fromstring(text.encode('utf-8'), parser)
         except:
             continue
     
-    # 最終手段
-    parser = etree.XMLParser(recover=True)
+    # 最終手段：エラー文字を無視して解析
+    parser = etree.XMLParser(recover=True, encoding='utf-8')
     return etree.fromstring(raw_data.decode('utf-8', errors='ignore').encode('utf-8'), parser)
 
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
@@ -77,12 +80,14 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
-                            xml_dom = get_xml_dom(xml_path)
-                            xsl_dom = get_xml_dom(os.path.join(xml_dir, xsl_files[0]))
+                            # 修正された関数を使用してXMLとXSLを読み込む
+                            xml_dom = safe_parse_xml(xml_path)
+                            xsl_dom = safe_parse_xml(os.path.join(xml_dir, xsl_files[0]))
                             
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
                             
+                            # HTMLからテキストを抽出してクリーニング
                             html_str = str(result_html)
                             clean_text = re.sub('<[^<]+?>', '', html_str)
                             clean_text = clean_text.replace('\xa0', ' ').replace('\u200b', '')
@@ -91,7 +96,7 @@ if uploaded_file is not None:
                             pdf = FPDF()
                             pdf.add_page()
                             
-                            # LinuxサーバーのIPAexフォントのパス
+                            # LinuxサーバーのIPAexフォントのパス（packages.txtで入れたもの）
                             font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
                             
                             if os.path.exists(font_path):
@@ -106,15 +111,8 @@ if uploaded_file is not None:
                             pdf_bytes = pdf.output()
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
-                            # 括弧の閉じ忘れを修正
                             st.download_button(
                                 label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
                                 data=pdf_bytes,
                                 file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
                                 mime="application/pdf",
-                                key="btn_" + xml_path
-                            )
-                        except Exception as e:
-                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
-            else:
-                st.warning("XMLファイルが見つかりませんでした。")
