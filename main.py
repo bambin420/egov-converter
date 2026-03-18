@@ -29,21 +29,26 @@ def extract_all_zips(target_dir):
                     except:
                         continue
 
-# 文字コードを安全に判別して「文字列」として返す関数
-def read_file_as_str(path):
-    # e-Govで使われやすい順に試行
+# 【修正の要】文字コードを安全に判別し、lxmlが文句を言わない形式で返す
+def get_xml_dom(path):
     encodings = ['cp932', 'utf-8', 'shift_jis', 'utf-16']
-    try:
-        with open(path, 'rb') as f:
-            raw_data = f.read()
-            for enc in encodings:
-                try:
-                    return raw_data.decode(enc)
-                except:
-                    continue
-            return raw_data.decode('utf-8', errors='ignore')
-    except Exception as e:
-        return ""
+    with open(path, 'rb') as f:
+        raw_data = f.read()
+        
+    for enc in encodings:
+        try:
+            # 1. まず指定のエンコードでデコードできるか試す
+            decoded_text = raw_data.decode(enc)
+            # 2. 成功したら、それを一度「XML宣言なしのバイト列」にしてから解析に渡す
+            # これにより、lxml内部での二重デコードを防ぎます
+            parser = etree.XMLParser(recover=True)
+            return etree.fromstring(decoded_text.encode('utf-8'), parser)
+        except:
+            continue
+    
+    # 最終手段：エラーを無視して読み込む
+    parser = etree.XMLParser(recover=True)
+    return etree.fromstring(raw_data.decode('utf-8', errors='ignore').encode('utf-8'), parser)
 
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
@@ -74,17 +79,9 @@ if uploaded_file is not None:
                     
                     if xsl_files:
                         try:
-                            # ファイルを文字列として読み込む
-                            xml_str = read_file_as_str(xml_path)
-                            xsl_str = read_file_as_str(os.path.join(xml_dir, xsl_files[0]))
-
-                            if not xml_str or not xsl_str:
-                                raise ValueError("ファイルの読み込みに失敗しました。")
-
-                            # XML解析 (文字列から読み込む)
-                            parser = etree.XMLParser(recover=True)
-                            xml_dom = etree.fromstring(xml_str.encode('utf-8'), parser)
-                            xsl_dom = etree.fromstring(xsl_str.encode('utf-8'), parser)
+                            # 修正した関数でDOMを取得
+                            xml_dom = get_xml_dom(xml_path)
+                            xsl_dom = get_xml_dom(os.path.join(xml_dir, xsl_files[0]))
                             
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
@@ -106,7 +103,7 @@ if uploaded_file is not None:
                                 pdf.set_font('Japanese', size=10)
                                 pdf.multi_cell(0, 8, txt=clean_text)
                             else:
-                                st.warning("フォントが見つからないため、標準フォントで出力します。")
+                                st.warning("フォントが見つかりません。")
                                 pdf.set_font('Courier', size=10)
                                 pdf.multi_cell(0, 8, txt=clean_text.encode('ascii', 'ignore').decode('ascii'))
                             
@@ -114,13 +111,3 @@ if uploaded_file is not None:
                             
                             st.success(f"変換完了: {os.path.basename(xml_path)}")
                             st.download_button(
-                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                data=pdf_bytes,
-                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                mime="application/pdf",
-                                key="btn_" + xml_path
-                            )
-                        except Exception as e:
-                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
-            else:
-                st.warning("XMLファイルが見つかりませんでした。")
