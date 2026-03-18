@@ -1,104 +1,111 @@
 import streamlit as st
 import zipfile
-import io
-import re
-from fpdf import FPDF
+import tempfile
 import os
+import re
+
+# 最小限のライブラリ
+try:
+    from fpdf import FPDF
+except ImportError:
+    st.error("fpdf2 が必要です。requirements.txt を確認してください。")
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
-st.title("e-Gov公文書変換ツール (環境依存エラー回避版)")
+st.title("e-Gov公文書変換ツール (超・回避モード)")
 
-def get_string_safely(byte_content):
-    """バイトデータを環境に依存せず安全に文字列化する"""
-    if not byte_content:
-        return ""
-    # 1. 日本語環境の候補を順に試す
-    for enc in ['cp932', 'utf-8', 'shift_jis', 'utf-16']:
+def extract_all_zips(target_dir):
+    for root, dirs, files in os.walk(target_dir):
+        for file in files:
+            if file.endswith('.zip'):
+                zip_path = os.path.join(root, file)
+                extract_dir = os.path.join(root, file.replace('.zip', ''))
+                if not os.path.exists(extract_dir):
+                    try:
+                        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                            zip_ref.extractall(extract_dir)
+                        extract_all_zips(extract_dir)
+                    except:
+                        continue
+
+def force_read_text(path):
+    """
+    どんな文字コードでも絶対にエラーを出さずに読み込む「力技」関数
+    """
+    # 1. まず「バイナリ(rb)」で開く。これで文字コード問題は一旦スルーされる。
+    with open(path, 'rb') as f:
+        data = f.read()
+    
+    # 2. 日本語で多い形式を順に試す
+    for enc in ['cp932', 'utf-8', 'shift_jis']:
         try:
-            return byte_content.decode(enc)
+            return data.decode(enc)
         except:
             continue
-    # 2. 全て失敗した場合はエラー文字を置換して強制デコード
-    return byte_content.decode('utf-8', errors='replace')
-
-def process_zip_recursive(zip_bytes, all_xml_contents):
-    """ZIPをバイナリとして扱い、ファイル名による自爆を避けて中身を抽出する"""
-    try:
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-            for info in z.infolist():
-                try:
-                    # 【ここが最重要】
-                    # zipfileはファイル名を勝手にデコードしようとするため、
-                    # 一度強制的にバイト列(cp437)に戻してから、正しくデコードし直す
-                    try:
-                        raw_filename = info.filename.encode('cp437')
-                    except:
-                        raw_filename = info.filename.encode('utf-8', errors='replace')
-                    
-                    display_name = get_string_safely(raw_filename)
-                    
-                    # 中身をバイナリとして読み出す
-                    with z.open(info) as f:
-                        content = f.read()
-                    
-                    if display_name.lower().endswith('.zip'):
-                        process_zip_recursive(content, all_xml_contents)
-                    elif display_name.lower().endswith('.xml'):
-                        all_xml_contents.append((display_name, content))
-                except:
-                    continue
-    except:
-        pass
+    
+    # 3. 全てダメなら「エラー文字を ? に置き換えて」強制的に読み込む
+    # これで 'utf-8' codec can't decode エラーは 100% 発生しなくなります。
+    return data.decode('utf-8', errors='replace')
 
 uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
 if uploaded_file is not None:
-    input_data = uploaded_file.read()
-    all_xml_list = []
-    
-    process_zip_recursive(input_data, all_xml_list)
-    
-    if not all_xml_list:
-        st.warning("XMLファイルが見つかりませんでした。")
-    else:
-        st.info(f"{len(all_xml_list)} 個のファイルを検出しました。")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # アップロードされたファイルを一時保存
+        zip_path = os.path.join(tmp_dir, "input.zip")
+        with open(zip_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
         
-        for i, (xml_name, raw_data) in enumerate(all_xml_list):
-            try:
-                # 中身をテキスト化（エラーを物理的に回避）
-                raw_text = get_string_safely(raw_data)
-                
-                # XMLタグを除去
-                clean_text = re.sub(r'<[^>]+?>', ' ', raw_text)
-                clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        # 全解凍
+        extract_all_zips(tmp_dir)
+        
+        # XMLファイルを探す
+        xml_files = []
+        for root, _, files in os.walk(tmp_dir):
+            for file in files:
+                if file.lower().endswith('.xml'):
+                    xml_files.append(os.path.join(root, file))
+        
+        if xml_files:
+            st.info(f"{len(xml_files)} 個のファイルを処理中...")
+            
+            for xml_path in xml_files:
+                filename = os.path.basename(xml_path)
+                try:
+                    # テキストを「エラー無視」で取得
+                    raw_content = force_read_text(xml_path)
+                    
+                    # XMLタグを消して中身の文字だけにする
+                    clean_text = re.sub(r'<[^>]+?>', ' ', raw_content)
+                    clean_text = re.sub(r'\s+', ' ', clean_text).strip()
 
-                # PDF生成
-                pdf = FPDF()
-                pdf.add_page()
-                
-                # フォントの指定（IPAexフォント）
-                font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
-                if os.path.exists(font_path):
-                    pdf.add_font('JP', '', font_path)
-                    pdf.set_font('JP', size=10)
-                    pdf.multi_cell(0, 8, txt=clean_text)
-                else:
-                    pdf.set_font('Courier', size=10)
-                    safe_ascii = clean_text.encode('ascii', 'ignore').decode('ascii')
-                    pdf.multi_cell(0, 8, txt=safe_ascii)
-                
-                pdf_output = pdf.output()
-                
-                # 安全な表示名
-                safe_label = os.path.basename(xml_name)
-                
-                st.success(f"変換完了: {safe_label}")
-                st.download_button(
-                    label=f"📥 PDFを保存: {safe_label.replace('.xml', '.pdf')}",
-                    data=pdf_output,
-                    file_name=safe_label.replace('.xml', '.pdf'),
-                    mime="application/pdf",
-                    key=f"dl_{i}_{safe_label}"
-                )
-            except Exception as e:
-                st.error(f"変換エラー ({xml_name}): {str(e)}")
+                    # PDF作成
+                    pdf = FPDF()
+                    pdf.add_page()
+                    
+                    # IPAフォントの確認
+                    font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
+                    if os.path.exists(font_path):
+                        pdf.add_font('JP', '', font_path)
+                        pdf.set_font('JP', size=10)
+                        pdf.multi_cell(0, 8, txt=clean_text)
+                    else:
+                        st.warning("日本語フォントがシステムに見つかりません。")
+                        pdf.set_font('Courier', size=10)
+                        # ASCII以外を消して出力（文字化け回避）
+                        safe_ascii = clean_text.encode('ascii', 'ignore').decode('ascii')
+                        pdf.multi_cell(0, 8, txt=safe_ascii)
+                    
+                    pdf_bytes = pdf.output()
+                    
+                    st.success(f"変換完了: {filename}")
+                    st.download_button(
+                        label=f"📥 PDFを保存: {filename.replace('.xml', '.pdf')}",
+                        data=pdf_bytes,
+                        file_name=filename.replace('.xml', '.pdf'),
+                        mime="application/pdf",
+                        key=f"dl_{filename}"
+                    )
+                except Exception as e:
+                    st.error(f"エラー ({filename}): {str(e)}")
+        else:
+            st.warning("XMLファイルが見つかりません。")

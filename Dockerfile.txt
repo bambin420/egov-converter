@@ -1,0 +1,27 @@
+# ベースとなるPythonイメージ
+FROM python:3.9-slim
+
+# OSレベルで日本語ロケールとIPAフォントをインストール
+RUN apt-get update && apt-get install -y \
+    locales \
+    fonts-ipaexfont-gothic \
+    && locale-gen ja_JP.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 環境変数を日本語に固定
+ENV LANG ja_JP.UTF-8
+ENV LANGUAGE ja_JP:ja
+ENV LC_ALL ja_JP.UTF-8
+
+# 作業ディレクトリの設定
+WORKDIR /app
+
+# 必要なファイルをコピー
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Streamlitの起動設定
+EXPOSE 8501
+CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
