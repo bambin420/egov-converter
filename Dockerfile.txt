@@ -1,27 +1,97 @@
-# ベースとなるPythonイメージ
-FROM python:3.9-slim
+import streamlit as st
+import zipfile
+import io
+import re
+from fpdf import FPDF
+import os
 
-# OSレベルで日本語ロケールとIPAフォントをインストール
-RUN apt-get update && apt-get install -y \
-    locales \
-    fonts-ipaexfont-gothic \
-    && locale-gen ja_JP.UTF-8 \
-    && rm -rf /var/lib/apt/lists/*
+st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
+st.title("e-Gov公文書変換ツール")
 
-# 環境変数を日本語に固定
-ENV LANG ja_JP.UTF-8
-ENV LANGUAGE ja_JP:ja
-ENV LC_ALL ja_JP.UTF-8
+def get_string_safely(byte_content):
+    """バイトデータを安全に文字列化"""
+    if not byte_content:
+        return ""
+    for enc in ['cp932', 'utf-8', 'shift_jis', 'utf-16']:
+        try:
+            return byte_content.decode(enc)
+        except:
+            continue
+    return byte_content.decode('utf-8', errors='replace')
 
-# 作業ディレクトリの設定
-WORKDIR /app
+def process_zip_recursive(zip_bytes, all_xml_contents):
+    """ZIPを再帰的に探索してXMLを抽出"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+            for info in z.infolist():
+                try:
+                    # ファイル名の文字化け対策
+                    try:
+                        raw_filename = info.filename.encode('cp437')
+                    except:
+                        raw_filename = info.filename.encode('utf-8', errors='replace')
+                    
+                    display_name = get_string_safely(raw_filename)
+                    
+                    with z.open(info) as f:
+                        content = f.read()
+                    
+                    if display_name.lower().endswith('.zip'):
+                        process_zip_recursive(content, all_xml_contents)
+                    elif display_name.lower().endswith('.xml'):
+                        all_xml_contents.append((display_name, content))
+                except:
+                    continue
+    except:
+        pass
 
-# 必要なファイルをコピー
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+uploaded_file = st.file_uploader("ZIPファイルをアップロードしてください")
 
-COPY . .
+if uploaded_file is not None:
+    input_data = uploaded_file.read()
+    all_xml_list = []
+    process_zip_recursive(input_data, all_xml_list)
+    
+    if not all_xml_list:
+        st.warning("XMLファイルが見つかりませんでした。")
+    else:
+        st.info(f"{len(all_xml_list)} 個のファイルを検出しました。")
+        
+        # Docker環境でのIPAexゴシックの標準的なパス
+        font_path = "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf"
+        
+        for i, (xml_name, raw_data) in enumerate(all_xml_list):
+            try:
+                raw_text = get_string_safely(raw_data)
+                # XMLタグ除去
+                clean_text = re.sub(r'<[^>]+?>', ' ', raw_text)
+                clean_text = re.sub(r'\s+', ' ', clean_text).strip()
 
-# Streamlitの起動設定
-EXPOSE 8501
-CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
+                pdf = FPDF()
+                pdf.add_page()
+                
+                if os.path.exists(font_path):
+                    pdf.add_font('JP', '', font_path)
+                    pdf.set_font('JP', size=10)
+                    pdf.multi_cell(0, 8, txt=clean_text)
+                else:
+                    st.warning("日本語フォントがシステムに見つかりません。標準フォントを使用します。")
+                    pdf.set_font('helvetica', size=10)
+                    # 日本語が含まれるとエラーになるため、ASCIIのみに制限
+                    safe_text = clean_text.encode('ascii', 'ignore').decode('ascii')
+                    pdf.multi_cell(0, 8, txt=safe_text)
+                
+                # 【解決策】output() の戻り値を bytes 型に固定する
+                pdf_bytes = bytes(pdf.output())
+                
+                safe_label = os.path.basename(xml_name)
+                st.success(f"変換完了: {safe_label}")
+                st.download_button(
+                    label=f"📥 PDFを保存: {safe_label.replace('.xml', '.pdf')}",
+                    data=pdf_bytes,
+                    file_name=safe_label.replace('.xml', '.pdf'),
+                    mime="application/pdf",
+                    key=f"dl_{i}_{safe_label}"
+                )
+            except Exception as e:
+                st.error(f"エラー ({xml_name}): {str(e)}")
