@@ -2,36 +2,21 @@ import streamlit as st
 import zipfile
 import tempfile
 import os
-# 修正前：from fpdf import FPDF
-# 修正後：以下のように書き換えてください
+import io
+
+# 1. ライブラリの読み込み（エラー対策込み）
+try:
+    from lxml import etree
+except ImportError:
+    st.error("lxmlがインストールされていません。requirements.txtを確認してください。")
 
 try:
     from fpdf import FPDF
 except ImportError:
-    # もしエラーが出たら別の名前で試みる（保険用）
-    import fpdf
-    FPDF = fpdf.FPDF
-from fpdf import FPDF
-import io
+    st.error("fpdf2がインストールされていません。requirements.txtを確認してください。")
 
 st.set_page_config(page_title="e-Gov公文書変換ツール", layout="centered")
 st.title("e-Gov公文書変換ツール")
-
-# PDF作成関数 (fpdf2を使用: 最も軽量で安定)
-def create_pdf_from_text(html_text):
-    pdf = FPDF()
-    pdf.add_page()
-    # 日本語フォントが必要な場合は別途設定が必要ですが、
-    # まずは標準フォントでPDF化が通るか確認します
-    pdf.set_font("Helvetica", size=12)
-    
-    # HTMLタグを除去してテキストのみを抽出
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html_text, "html.parser")
-    clean_text = soup.get_text()
-    
-    pdf.multi_cell(0, 10, clean_text)
-    return pdf.output()
 
 def extract_all_zips(target_dir):
     for root, dirs, files in os.walk(target_dir):
@@ -92,25 +77,12 @@ if uploaded_file is not None:
                             
                             transform = etree.XSLT(xsl_dom)
                             result_html = transform(xml_dom)
+                            
+                            # HTMLからテキストを抽出（PDF用）
                             html_str = str(result_html)
-
-                            # PDF生成 (fpdf2を使用)
+                            
+                            # PDF生成
                             pdf_output = FPDF()
                             pdf_output.add_page()
-                            # e-Govの日本語を表示するためフォント設定（後ほど調整可能）
-                            pdf_output.set_font("Arial", size=12)
-                            pdf_output.multi_cell(0, 10, txt=html_str[:2000]) # 簡易抽出
-                            
-                            pdf_bytes = pdf_output.output()
-                            
-                            st.success(f"変換完了: {os.path.basename(xml_path)}")
-                            st.download_button(
-                                label=f"📥 PDFダウンロード: {os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                data=pdf_bytes,
-                                file_name=f"{os.path.basename(xml_path).replace('.xml', '.pdf')}",
-                                mime="application/pdf"
-                            )
-                        except Exception as e:
-                            st.error(f"変換エラー ({os.path.basename(xml_path)}): {str(e)}")
-            else:
-                st.warning("XMLファイルが見てかりませんでした。")
+                            # 標準フォントを指定
+                            pdf_output.set_font("Arial", size=10)
